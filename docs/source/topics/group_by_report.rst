@@ -15,27 +15,31 @@ Example:
 .. code-block:: python
 
     class GroupByReport(ReportView):
-    report_model = SalesTransaction
-    report_title = _("Group By Report")
-    date_field = "date"
-    group_by = "product"
+        report_model = SalesTransaction
+        report_title = _("Group By Report")
+        date_field = "date"
+        group_by = "product"
 
-    columns = [
-        "name",
-        ComputationField.create(
-            method=Sum, field="value", name="value__sum", verbose_name="Total sold $", is_summable=True,
-        ),
-    ]
+        columns = [
+            "name",
+            ComputationField.create(
+                method=Sum,
+                field="value",
+                name="value__sum",
+                verbose_name="Total sold $",
+                is_summable=True,
+            ),
+        ]
 
-    # Charts
-    chart_settings = [
-        Chart(
-            "Total sold $",
-            Chart.BAR,
-            data_source=["value__sum"],
-            title_source=["name"],
-        ),
-    ]
+        # Charts
+        chart_settings = [
+            Chart(
+                "Total sold $",
+                Chart.BAR,
+                data_source=["value__sum"],
+                title_source=["name"],
+            ),
+        ]
 
 
 A Sample group by report would look like this:
@@ -62,9 +66,10 @@ Example:
     class GroupByTraversingFieldReport(GroupByReport):
 
         report_title = _("Group By Traversing Field")
-        group_by = "product__product_category" # Note the traversing
+        group_by = "product__product_category"  # Note the traversing
 
 
+.. _group_by_custom_querysets_topic:
 
 Group by custom querysets
 -------------------------
@@ -89,7 +94,9 @@ Example:
 
             columns = [
                 "__index__",
-                ComputationField.create(Sum, "value", verbose_name=_("Total Sold $"), name="value"),
+                ComputationField.create(
+                    Sum, "value", verbose_name=_("Total Sold $"), name="value"
+                ),
             ]
 
             chart_settings = [
@@ -109,13 +116,13 @@ Example:
 
             def format_row(self, row_obj):
                 # Put the verbose names we need instead of the integer index
-                index = row_obj['__index__']
+                index = row_obj["__index__"]
                 if index == 0:
                     row_obj["__index__"] = "Big"
                 elif index == 1:
-                    row_obj['__index__'] = "Small"
+                    row_obj["__index__"] = "Small"
                 elif index == 2:
-                    row_obj['__index__'] = "Medium"
+                    row_obj["__index__"] = "Medium"
                 return row_obj
 
 
@@ -126,6 +133,8 @@ It just hold the index of the row in the group.
 its verbose name (ie the one on the table header) can be customized via ``group_by_custom_querysets_column_verbose_name``
 
 You can then customize the *value* of the __index__ column via ``format_row`` hook
+
+.. _no_group_by_topic:
 
 The No Group By
 ---------------
@@ -144,7 +153,11 @@ Example:
 
         columns = [
             ComputationField.create(
-                method=Sum, field="value", name="value__sum", verbose_name="Total sold $", is_summable=True,
+                method=Sum,
+                field="value",
+                name="value__sum",
+                verbose_name="Total sold $",
+                is_summable=True,
             ),
         ]
 

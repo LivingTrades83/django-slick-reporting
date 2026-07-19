@@ -2,6 +2,97 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2026-05-01
+
+### New Features
+
+- **Dynamic Model support** — generate reports from any database table without defining a Django model.
+  New ``get_dynamic_model(table_name, database, schema)`` utility introspects a live table and returns a
+  fully usable (unmanaged) Django model. Supports 20+ field types and PostgreSQL schemas
+  (``schema`` parameter generates ``"schema"."table_name"`` as the db table).
+  Models are cached after first introspection.
+- **``table_name`` attribute on ``ReportGenerator`` and ``ReportView``** — shorthand for using a dynamic model.
+  Setting ``table_name = "my_table"`` is equivalent to setting ``report_model = get_dynamic_model("my_table")``.
+  Column validation is deferred to request time for ``table_name``-based views so imports do not trigger
+  database access.
+- **Pre-computed crosstab reports** — new ``crosstab_precomputed = True`` flag on ``ReportGenerator``
+  switches from live aggregation to reading existing column values and pivoting them.
+  Use ``crosstab_columns`` to name the value columns and ``crosstab_field`` to identify the pivot field.
+  Distinct values for ``crosstab_field`` are auto-discovered from the database if ``crosstab_ids`` is not set.
+  Intended for materialized views, data-warehouse fact tables, and pre-aggregated ETL outputs.
+- **Print / HTML export** — new ``PrintHTMLExport`` class renders a clean, RTL-aware, print-ready HTML
+  page and triggers ``window.print()`` automatically. Enabled by default on all ``ReportView`` subclasses
+  via the new ``print_export_class`` attribute. The print export button opens in a new browser tab.
+  Templates are split into ``print_report.html``, ``print_report_header.html``, ``print_report_footer.html``,
+  and ``print_report_controls.html`` for easy overriding.
+- **Arabic (ar) and German (de) translations** added.
+
+### Improvements
+
+- **Static asset path resolution** — template tags now consistently apply Django's ``static()`` to any
+  relative URL in settings (jQuery URL, chart engine JS files, Font Awesome CSS URL). The
+  ``slick_reporting_settings`` JSON block written to the page also contains fully resolved static URLs,
+  ensuring correct paths with ``ManifestStaticFilesStorage`` or CDN-backed storages.
+- **Export action metadata** — ``get_export_actions()`` now includes a ``new_window`` flag per action;
+  the JS export handler opens a new tab when the flag is set, used by the print export.
+- **Report form extracted** — the filter form markup is now in its own ``report_form.html`` template
+  (included by ``report.html``) making it easier to override just the form section.
+- **Select2 removed from core assets** — Select2 was a demo-only dependency that made it into the default
+  ``SLICK_REPORTING_SETTINGS["MEDIA"]`` JS/CSS lists and was auto-initialised in ``report_loader.js``.
+  It is now removed from the library defaults; demo project configures it separately.
+- **``fkeys_filter_func_hook``** — new static method on ``ReportViewBase`` that receives the dict of
+  detected foreign-key fields before the filter form is built. Override it to exclude or rename fields
+  (e.g. remove internal FK columns such as ``polymorphic_ctype_id``).
+- **Chart error recovery** — chart rendering errors are now caught in ``report_loader.js`` and displayed
+  as an inline message instead of silently breaking the rest of the page.
+
+### Bug Fixes
+
+- Fix ``crosstab_compute_remainder`` class-level attribute being ignored; the value was always read from
+  the request instead of falling back to the class default.
+
+### Chart Engine Fixes
+
+- Update Highcharts wrapper to use the modern ``Highcharts.chart()`` API (v11+), replacing the removed
+  jQuery plugin syntax. Switch default Highcharts CDN to jsDelivr (``cdn.jsdelivr.net/npm/highcharts@11``).
+- Fix Chart.js wrapper: corrected inverted ``is_time_series`` check; update to Chart.js v3/v4 API
+  (``plugins.title``, ``plugins.tooltip``, ``scales.y`` / ``scales.x``).
+- Add crosstab support to the Chart.js wrapper.
+- Fix Chart.js ``area`` chart type to render as ``line`` with ``fill: true``.
+- Fix Chart.js pie chart on time-series reports: automatically enables ``plot_total``.
+- Fix Chart.js pie chart sizing with ``aspectRatio: 2``.
+- Fix Chart.js chart cache key to include the element xpath, preventing chart destruction when
+  the same report appears multiple times on a dashboard.
+
+## [1.3.1] - 2024-06-16
+- Fix issue with Line Chart on highcharts engine
+- Reintroduce the stacking option on highcharts engine.
+- Fix issue with having different version of the same chart on the same page.
+- Enhanced the demo dashboard to show more capabilities regarding the charts.
+
+## [1.3.0] - 2023-11-08
+- Implement Slick reporting media override feature + docs
+- Add `Integrating reports into your Admin site` section to the docs
+- Group by and crosstab reports do not need date_field set anymore. Only time series do.
+- Fix in FirstBalance Computation field if no date is supplied
+- Add `REPORT_VIEW_ACCESS_FUNCTION` to control access to the report view
+
+
+## [1.2.0] - 2023-10-10
+- Add ``get_slick_reporting_media`` and ``get_charts_media`` templatetags
+- Add `get_group_by_custom_querysets` hook to ReportView
+- Enhance and document adding export options and customizing the builtin export to csv button
+- Enhance and document adding custom buttons to the report page
+- Enhance and document adding a new chart engine
+- Fix in SlickReportingListView
+- Move all css and js resources to be handled by `Media` governed by `settings.SLICK_REPORTING_SETTINGS`
+
+ 
+## [1.1.1] - 2023-09-25
+- Change settings to be a dict , adding support JQUERY_URL and FONT AWESOME customization #79 & #81
+- Fix issue with chartjs not being loaded  #80
+- Remove `SLICK_REPORTING_FORM_MEDIA`
+
 ## [1.1.0] -
 - Breaking: changed ``report_title_context_key`` default value to `report_title`
 - Breaking: Renamed simple_report.html to report.html
@@ -60,7 +151,7 @@ All notable changes to this project will be documented in this file.
 - Breaking: [Only if you use Crosstab reports] renamed crosstab_compute_reminder to crosstab_compute_remainder
 - Breaking : [Only if you set the templates statics by hand] renamed slick_reporting to ra.hightchart.js and ra.chartjs.js to 
   erp_framework.highchart.js and erp_framework.chartjs.js respectively
-- Fix an issue with Crosstab when there crosstab_compute_remainder = False 
+- Fix an issue with Crosstab when there crosstab_compute_remainder = False
 
 ## [0.7.0]
 

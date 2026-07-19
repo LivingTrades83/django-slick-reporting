@@ -10,6 +10,7 @@ from .app_settings import SLICK_REPORTING_DEFAULT_CHARTS_ENGINE
 from .fields import ComputationField
 from .helpers import get_field_from_query_text
 from .registry import field_registry
+from . import app_settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,9 @@ class Chart:
     data_source: list
     title_source: list
     plot_total: bool = False
-    engine: str = SLICK_REPORTING_DEFAULT_CHARTS_ENGINE
+    stacking: bool = False  # only for highcharts
+    engine: str = ""
+    entryPoint: str = ""
     COLUMN = "column"
     LINE = "line"
     PIE = "pie"
@@ -36,12 +39,17 @@ class Chart:
             title_source=self.title_source,
             plot_total=self.plot_total,
             engine=self.engine,
+            entryPoint=self.entryPoint,
+            stacking=self.stacking,
         )
 
 
 class ReportGeneratorAPI:
     report_model = None
     """The main model where data is """
+
+    table_name = ""
+    """If set, a dynamic model will be created from this database table name"""
 
     queryset = None
     """If set, the report will use this queryset instead of the report_model"""
@@ -138,6 +146,10 @@ class ReportGeneratorAPI:
     """
     swap_sign = False
 
+    crosstab_precomputed = False
+    """If True, crosstab reads pre-computed values from the database instead of aggregating raw data.
+    In this mode, crosstab_columns should be a list of DB column name strings (not ComputationField classes)."""
+
 
 class ReportGenerator(ReportGeneratorAPI, object):
     """
@@ -169,6 +181,7 @@ class ReportGenerator(ReportGeneratorAPI, object):
         crosstab_ids=None,
         crosstab_ids_custom_filters=None,
         crosstab_compute_remainder=None,
+        crosstab_precomputed=None,
         swap_sign=False,
         show_empty_records=None,
         print_flag=False,
@@ -179,6 +192,7 @@ class ReportGenerator(ReportGeneratorAPI, object):
         container_class=None,
         start_date_field_name=None,
         end_date_field_name=None,
+        table_name=None,
     ):
         """
 
@@ -211,6 +225,12 @@ class ReportGenerator(ReportGeneratorAPI, object):
         )
 
         super().__init__()
+
+        _table_name = table_name or self.table_name
+        if _table_name and not (report_model or self.report_model):
+            from .dynamic_model import get_dynamic_model
+
+            report_model = get_dynamic_model(_table_name)
 
         self.report_model = self.report_model or report_model
         if self.queryset is None:
@@ -246,6 +266,14 @@ class ReportGenerator(ReportGeneratorAPI, object):
         self.crosstab_compute_remainder = (
             self.crosstab_compute_remainder if crosstab_compute_remainder is None else crosstab_compute_remainder
         )
+        self.crosstab_precomputed = self.crosstab_precomputed if crosstab_precomputed is None else crosstab_precomputed
+        self._precomputed_crosstab_data = {}
+
+        if self.crosstab_precomputed:
+            if not self.crosstab_field:
+                raise ImproperlyConfigured("crosstab_precomputed requires crosstab_field to be set")
+            if not self.crosstab_columns:
+                raise ImproperlyConfigured("crosstab_precomputed requires crosstab_columns to be set")
 
         self.format_row = format_row_func or self._default_format_row
 
@@ -266,11 +294,13 @@ class ReportGenerator(ReportGeneratorAPI, object):
         self.time_series_custom_dates = self.time_series_custom_dates or time_series_custom_dates
         self.container_class = container_class
 
-        if not (self.date_field or (self.start_date_field_name and self.end_date_field_name)) and (
-            self.time_series_pattern or self.crosstab_field or self.group_by
+        if (
+            not (self.date_field or (self.start_date_field_name and self.end_date_field_name))
+            and self.time_series_pattern
         ):
             raise ImproperlyConfigured(
-                f"date_field or [start_date_field_name and end_date_field_name] must be set for {container_class or self}"
+                f"date_field or [start_date_field_name and end_date_field_name] must "
+                f"be set for {container_class or self}"
             )
 
         self._prepared_results = {}
@@ -320,21 +350,35 @@ class ReportGenerator(ReportGeneratorAPI, object):
         self.main_queryset = self.prepare_queryset(main_queryset)
         self._prepare_report_dependencies()
 
+    def _get_fk_group_by_queryset(self, filtered_qs):
+        """Return the related-model queryset for a ForeignKey group_by field."""
+        ids = filtered_qs.values_list(self.group_by_field_attname).distinct()
+        # uses the same logic that is in Django's query.py when fields is empty in values() call
+        concrete_fields = [f.name for f in self.group_by_field.related_model._meta.concrete_fields]
+        # add database columns that are not already in concrete_fields
+        final_fields = concrete_fields + list(set(self.get_database_columns()) - set(concrete_fields))
+        return self.group_by_field.related_model.objects.filter(
+            **{f"{self.group_by_field.target_field.name}__in": ids}
+        ).values(*final_fields)
+
     def prepare_queryset(self, queryset):
+        if self.crosstab_precomputed:
+            self._build_precomputed_crosstab_data(queryset)
+            self._crosstab_parsed_columns = self.get_crosstab_parsed_columns()
+
+            if not self.group_by:
+                return [{}]
+            filtered_qs = self._apply_queryset_options(queryset)
+            if type(self.group_by_field) is ForeignKey:
+                return self._get_fk_group_by_queryset(filtered_qs)
+            return filtered_qs.values(self.group_by_field_attname).distinct()
+
         if self.group_by_custom_querysets:
             return [{"__index__": i} for i, v in enumerate(self.group_by_custom_querysets)]
         elif self.group_by:
             main_queryset = self._apply_queryset_options(queryset)
-
             if type(self.group_by_field) is ForeignKey:
-                ids = main_queryset.values_list(self.group_by_field_attname).distinct()
-                # uses the same logic that is in Django's query.py when fields is empty in values() call
-                concrete_fields = [f.name for f in self.group_by_field.related_model._meta.concrete_fields]
-                # add database columns that are not already in concrete_fields
-                final_fields = concrete_fields + list(set(self.get_database_columns()) - set(concrete_fields))
-                return self.group_by_field.related_model.objects.filter(
-                    **{f"{self.group_by_field.target_field.name}__in": ids}
-                ).values(*final_fields)
+                return self._get_fk_group_by_queryset(main_queryset)
             else:
                 return main_queryset.distinct().values(self.group_by_field_attname)
 
@@ -372,6 +416,39 @@ class ReportGenerator(ReportGeneratorAPI, object):
         if fields:
             return query.values(*fields)
         return query.values()
+
+    def _apply_precomputed_queryset_options(self, query):
+        """Apply filters for precomputed crosstab data fetch, using __gte/__lte boundaries."""
+        filters = {}
+        if self.date_field:
+            filters = {
+                f"{self.start_date_field_name}__gte": self.start_date,
+                f"{self.end_date_field_name}__lte": self.end_date,
+            }
+        filters.update(self.kwargs_filters)
+        if filters:
+            query = query.filter(**filters)
+        if self.q_filters:
+            query = query.filter(*self.q_filters)
+        return query.values()
+
+    def _build_precomputed_crosstab_data(self, queryset):
+        """Pre-fetch all rows and build the precomputed crosstab lookup dict."""
+        filtered_qs = self._apply_precomputed_queryset_options(queryset)
+        rows = filtered_qs.values(self.group_by_field_attname, self.crosstab_field, *self.crosstab_columns)
+
+        crosstab_values_set = set()
+        for row in rows:
+            group_key = str(row[self.group_by_field_attname])
+            crosstab_val = str(row[self.crosstab_field])
+            crosstab_values_set.add(row[self.crosstab_field])
+
+            if group_key not in self._precomputed_crosstab_data:
+                self._precomputed_crosstab_data[group_key] = {}
+            self._precomputed_crosstab_data[group_key][crosstab_val] = {col: row[col] for col in self.crosstab_columns}
+
+        if not self.crosstab_ids:
+            self.crosstab_ids = sorted(crosstab_values_set)
 
     def _construct_crosstab_filter(self, col_data, queryset_filters=None):
         """
@@ -447,10 +524,12 @@ class ReportGenerator(ReportGeneratorAPI, object):
                 )
 
                 q_filters = None
-                date_filter = {
-                    f"{self.start_date_field_name}__gte": col_data.get("start_date", self.start_date),
-                    f"{self.end_date_field_name}__lt": col_data.get("end_date", self.end_date),
-                }
+                date_filter = {}
+                if self.start_date_field_name:
+                    date_filter[f"{self.start_date_field_name}__gte"] = col_data.get("start_date", self.start_date)
+                if self.end_date_field_name:
+                    date_filter[f"{self.end_date_field_name}__lt"] = col_data.get("end_date", self.end_date)
+
                 date_filter.update(self.kwargs_filters)
                 if window == "crosstab" or col_data.get("computation_flag", "") == "crosstab":
                     q_filters, kw_filters = col_data["queryset_filters"]
@@ -494,7 +573,13 @@ class ReportGenerator(ReportGeneratorAPI, object):
             for col_data in window_cols:
                 name = col_data["name"]
 
-                if col_data.get("source", "") == "attribute_field":
+                if col_data.get("source", "") == "precomputed_crosstab":
+                    crosstab_val = col_data["crosstab_value"]
+                    crosstab_col = col_data["crosstab_column"]
+                    group_data = self._precomputed_crosstab_data.get(group_by_val, {})
+                    data[name] = group_data.get(crosstab_val, {}).get(crosstab_col, 0)
+
+                elif col_data.get("source", "") == "attribute_field":
                     data[name] = col_data["ref"](obj, data)
                 elif col_data.get("source", "") == "container_class_attribute_field":
                     data[name] = col_data["ref"](obj, data)
@@ -506,13 +591,14 @@ class ReportGenerator(ReportGeneratorAPI, object):
 
                     if source:
                         computation_class = self.report_fields_classes[source]
+                        # the computation field is being asked from another computation field that requires it.
                         value = computation_class.get_dependency_value(group_by_val, col_data["ref"].name)
                     else:
                         try:
                             computation_class = self.report_fields_classes[name]
                         except KeyError:
                             continue
-                        value = computation_class.resolve(group_by_val, data)
+                        value = computation_class.do_resolve(group_by_val, data)
                     if self.swap_sign:
                         value = -value
                     data[name] = value
@@ -572,7 +658,8 @@ class ReportGenerator(ReportGeneratorAPI, object):
                 group_by_field = [x for x in report_model._meta.get_fields() if x.name == group_by.split("__")[0]][0]
             except IndexError:
                 raise ImproperlyConfigured(
-                    f"ReportView {cls}: Could not find the group_by field: `{group_by}` in report_model: `{report_model}`"
+                    f"ReportView {cls}: Could not find the group_by field: `{group_by}` in "
+                    f"report_model: `{report_model}`"
                 )
             if group_by_field.is_relation:
                 group_by_model = group_by_field.related_model
@@ -820,6 +907,9 @@ class ReportGenerator(ReportGeneratorAPI, object):
         Return a list of the columns analyzed , with reference to computation field and everything
         :return:
         """
+        if self.crosstab_precomputed:
+            return self._get_precomputed_crosstab_parsed_columns()
+
         report_columns = self.crosstab_columns or []
 
         ids = list(self.crosstab_ids) or list(self.crosstab_ids_custom_filters)
@@ -861,6 +951,28 @@ class ReportGenerator(ReportGeneratorAPI, object):
                 output_cols.append(crosstab_column)
 
         return output_cols
+
+    def _get_precomputed_crosstab_parsed_columns(self):
+        """Build column metadata for precomputed crosstab from discovered values."""
+        columns = []
+        for crosstab_val in self.crosstab_ids:
+            sanitized = _sanitize_crosstab_key(crosstab_val)
+            for col_name in self.crosstab_columns:
+                columns.append(
+                    {
+                        "name": f"{col_name}CT{sanitized}",
+                        "original_name": col_name,
+                        "verbose_name": f"{col_name} {crosstab_val}",
+                        "source": "precomputed_crosstab",
+                        "is_summable": True,
+                        "ref": "",
+                        "crosstab_value": str(crosstab_val),
+                        "crosstab_column": col_name,
+                        "type": "number",
+                        "visible": True,
+                    }
+                )
+        return columns
 
     def get_crosstab_field_verbose_name(self, computation_class, model, id):
         """
@@ -911,36 +1023,46 @@ class ReportGenerator(ReportGeneratorAPI, object):
             )
         return data
 
-    def get_full_response(self, data=None, report_slug=None, chart_settings=None, default_chart_title=None):
+    def get_full_response(
+        self, data=None, report_slug=None, chart_settings=None, default_chart_title=None, default_chart_engine=None
+    ):
         data = data or self.get_report_data()
         data = {
             "report_slug": report_slug or self.__class__.__name__,
             "data": data,
             "columns": self.get_columns_data(),
             "metadata": self.get_metadata(),
-            "chart_settings": self.get_chart_settings(chart_settings, default_chart_title=default_chart_title),
+            "chart_settings": self.get_chart_settings(
+                chart_settings, default_chart_title=default_chart_title, chart_engine=default_chart_engine
+            ),
         }
         return data
 
-    def get_chart_settings(self, chart_settings=None, default_chart_title=None):
+    @staticmethod
+    def get_chart_settings(chart_settings=None, default_chart_title=None, chart_engine=None):
         """
-        Ensure the sane settings are passed to the front end.
+        Ensure the sane settings are passed to the front end. ?
         """
+        chart_engine = chart_engine or SLICK_REPORTING_DEFAULT_CHARTS_ENGINE
         output = []
         chart_settings = chart_settings or []
         report_title = default_chart_title or ""
         for i, chart in enumerate(chart_settings):
             if type(chart) is Chart:
                 chart = chart.to_dict()
-
             chart["id"] = chart.get("id", f"{i}")
+            chart["engine_name"] = chart.get("engine_name", chart_engine)
             chart_type = chart.get("type", "line")
-            if chart_type == "column" and SLICK_REPORTING_DEFAULT_CHARTS_ENGINE == "chartsjs":
+            if chart_type == "column" and chart["engine_name"] == "chartsjs":
                 chart["type"] = "bar"
-
             if not chart.get("title", False):
                 chart["title"] = report_title
-            chart["engine_name"] = chart.get("engine_name", SLICK_REPORTING_DEFAULT_CHARTS_ENGINE)
+            chart["entryPoint"] = (
+                chart.get("entryPoint")
+                or app_settings.SLICK_REPORTING_SETTINGS["CHARTS"][chart["engine_name"]]["entryPoint"]
+            )
+            chart["stacking"] = chart.get("stacking", False)
+
             output.append(chart)
         return output
 
@@ -1011,7 +1133,7 @@ class ListViewReportGenerator(ReportGenerator):
                             computation_class = self.report_fields_classes[name]
                         except KeyError:
                             continue
-                        value = computation_class.resolve(group_by_val, data)
+                        value = computation_class.do_resolve(group_by_val, data)
                     if self.swap_sign:
                         value = -value
                     data[name] = value
@@ -1022,3 +1144,10 @@ class ListViewReportGenerator(ReportGenerator):
 
     def _remove_order(self, main_queryset):
         return main_queryset
+
+
+def _sanitize_crosstab_key(value):
+    """Sanitize a crosstab value for use in column names. Replace non-alphanumeric chars with underscores."""
+    import re
+
+    return re.sub(r"[^a-zA-Z0-9_]", "_", str(value))

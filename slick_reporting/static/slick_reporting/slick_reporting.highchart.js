@@ -1,5 +1,6 @@
 /**
- * Created by ramez on 11/20/14.
+ * Created by Ramez on 11/20/14.
+ * Updated to support modern Highcharts API (v11+).
  */
 (function ($) {
 
@@ -19,39 +20,7 @@
             return output
         }
 
-        function getObjFromArray(objList, obj_key, key_value, failToFirst) {
-            failToFirst = typeof (failToFirst) !== 'undefined';
-            if (key_value !== '') {
-                for (let i = 0; i < objList.length; i++) {
-                    if (objList[i][obj_key] === key_value) {
-                        return objList[i];
-                    }
-                }
-            }
-            if (failToFirst && objList.length > 0) {
-                return objList[0]
-            }
 
-            return false;
-        }
-
-        var ra_chart_settings = {
-
-
-            //exporting: {
-            //    allowHTML:true,
-            //    enabled: faelse,
-            //},
-
-
-            func2: function () {
-                var tooltip = '<small>' + this.point.key + '</small><table><tr><td style="color:' + this.series.color +
-                    '">' + this.series.name + ': </td> <td style="text-align: right"><b>' +
-                    this.point.y + ' </b></td></tr>' +
-                    '<tr><td style="color: ' + this.series.color + '">{Percentage}:</td>' +
-                    '<td style="text-align: right"><b>' + this.point.percentage + ' %</b></td></tr></table>'
-            }
-        };
         let _chart_cache = {};
 
         function normalStackedTooltipFormatter() {
@@ -82,28 +51,21 @@
             }
         }
 
-        function createChartObject(response, chart_id, extraOptions) {
+        function createChartObject(response, chartOptions, extraOptions) {
             // Create the chart Object
-            // First specifying the global default
-            // second, Get the data from the serponse
-            // Adjust the Chart Object accordingly
-            let chartOptions = getObjFromArray(response.chart_settings, 'id', chart_id, true)
+            // First specifying the global defaults then apply the specification from the response
 
             try {
-
-
                 $.extend(chartOptions, {
                     'sub_title': '',
                 });
-                // chartOptions = getChartOptions(isGroup, response, chartOptions);
                 chartOptions.data = response.data;
-
 
                 let is_time_series = is_timeseries_support(response, chartOptions); // response.metadata.time_series_pattern || '';
                 let is_crosstab = is_crosstab_support(response, chartOptions);
 
                 let chart_type = chartOptions.type;
-                var enable3d = false;
+                let enable3d = false;
                 let chart_data = {};
 
                 let rtl = false; // $.slick_reporting.highcharts.defaults.rtl;
@@ -120,37 +82,29 @@
                 let highchart_object = {
                     chart: {
                         type: '',
-                        //renderTo: 'container',
-                        //printWidth: 600
                     },
                     title: {
                         text: chartOptions.title,
-                        // useHTML: Highcharts.hasBidiBug
-                        //useHTML: true
                     },
                     subtitle: {
                         text: chartOptions.sub_title,
-                        useHTML: Highcharts.hasBidiBug
-                        //useHTML: true
+                        useHTML: true
                     },
                     yAxis: {
-                        // title: {text: chartyAxisTitle},
                         opposite: rtl,
                     },
                     xAxis: {
-                        // title: {text: chartxAxisTitle},
                         labels: {enabled: true},
                         reversed: rtl,
                     },
                     tooltip: {
-                        useHTML: Highcharts.hasBidiBug
+                        useHTML: true
                     },
                     plotOptions: {},
                     exporting: {
                         allowHTML: true,
 
                         enabled: true,
-                        //scale:2,
                     }
                 };
 
@@ -163,9 +117,6 @@
                     if (chart_type === 'bar' || chart_type === 'column') {
                         highchart_object['xAxis'] = {
                             categories: chart_data['titles'],
-                            // title: {
-                            //     text: null
-                            // }
                         };
                     }
                     highchart_object['yAxis']['labels'] = {overflow: 'justify'};
@@ -181,24 +132,9 @@
                                 enabled: true,
                                 format: '{point.percentage:.1f}% <b>{point.name}</b>',
                             },
-                            showInLegend: false, // ($(window).width() >= 1024) ,
-                            style: {
-                                color: (Highcharts.theme && Highcharts.theme.contrastTextColor) || 'black'
-                            }
+                            showInLegend: false,
                         }
                     };
-
-                    // highchart_object.tooltip = {
-                    //     useHTML: true,
-                    //     headerFormat: '<small>{point.key}</small><table class="chart-tooltip">',
-                    //     pointFormat: '<tr><td style="color:' + Highcharts.theme.contrastTextColor + '">{series.name}: </td>' +
-                    //         '<td style="text-align: right; color: ' + Highcharts.theme.contrastTextColor + '"><b>{point.y} </b></td></tr>' +
-                    //
-                    //         '<tr><td style="color: ' + Highcharts.theme.contrastTextColor + '">' + $.ra.highcharts.defaults.messages.percent + '</td>' +
-                    //         '<td style="text-align: right; color: ' + Highcharts.theme.contrastTextColor + '"><b>{point.percentage:.1f} %</b></td></tr>',
-                    //     footerFormat: '</table>',
-                    //     valueDecimals: 2
-                    // };
 
                     highchart_object['legend'] = {
                         layout: 'vertical',
@@ -235,7 +171,8 @@
                         highchart_object.chart.margin = 70;
                     }
                     if (chartOptions['stacking']) {
-                        highchart_object.plotOptions.series = {stacking: chartOptions['stacking']};
+                        let stackingValue = chartOptions['stacking'] === true ? 'normal' : chartOptions['stacking'];
+                        highchart_object.plotOptions.series = {stacking: stackingValue};
                     }
                     if (chartOptions['tooltip_formatter']) {
                         highchart_object.tooltip = {
@@ -244,19 +181,23 @@
                             valueDecimals: 2
                         }
                     }
+
+
                 } else if (chart_type === 'area') {
                     highchart_object.chart.type = 'area';
 
+                    let areaStacking = chartOptions['stacking'] === true ? 'normal' : (chartOptions['stacking'] || undefined);
                     highchart_object.plotOptions = {
                         area: {
-                            stacking: chartOptions['stacking'] || 'normal',
+                            stacking: areaStacking,
                             marker: {
                                 enabled: false
                             }
                         }
                     }
                 } else if (chart_type === 'line') {
-                    var marker_enabled = true;
+                    let marker_enabled = true;
+                    highchart_object.chart.type = 'line';
                     // disable marker when ticks are more then 12 , relying on the hover of the mouse ;
                     try {
                         if (highchart_object.series[0].data.length > 12) marker_enabled = false;
@@ -279,7 +220,11 @@
                 }
 
                 if (is_time_series) {
-                    highchart_object.xAxis.categories = chart_data.titles;
+                    if (chartOptions.plot_total && chartOptions.type !== 'line') {
+                        highchart_object.xAxis.categories = [chartOptions.title]
+                    } else {
+                        highchart_object.xAxis.categories = chart_data.titles;
+                    }
                     highchart_object.xAxis.tickmarkPlacement = 'on';
                     if (chart_type !== 'line')
                         highchart_object.tooltip.shared = false //Option here;
@@ -352,22 +297,32 @@
                 })
             } else {
                 let all_column_to_be_summed = []
+                let data = []
                 Object.keys(data_sources).forEach(function (series_cols, index) {
                     all_column_to_be_summed = all_column_to_be_summed.concat(data_sources[series_cols]);
                 })
                 let totalValues = $.slick_reporting.calculateTotalOnObjectArray(response.data, all_column_to_be_summed)
 
                 Object.keys(data_sources).forEach(function (series_cols, index) {
-                    let data = []
-                    data_sources[series_cols].forEach(function (col, index) {
 
-                        series.push({
-                            'name': response.metadata.time_series_column_verbose_names[index],
-                            data: [totalValues[col]]
-                        })
+                    data_sources[series_cols].forEach(function (col, index) {
+                        data.push(totalValues[col])
+                        if (chartOptions.type !== "line") {
+                            series.push({
+                                'name': response.metadata.time_series_column_verbose_names[index],
+                                data: [totalValues[col]]
+                            })
+                        }
                     })
 
                 })
+                if (chartOptions.type === "line") {
+                    series.push({
+                        'name': chartOptions.title,
+                        data: data
+                    })
+                }
+
             }
             return {
                 'categories': response.metadata.time_series_column_verbose_names,
@@ -415,10 +370,7 @@
                             'name': col_dict[col].verbose_name,
                             'data': [totalValues[col]]
                         })
-
                     })
-
-
                 })
             }
             return {
@@ -438,27 +390,25 @@
             return response.metadata.crosstab_model || ''
         }
 
-        function displayChart(data, $elem, chart_id) {
-            chart_id = chart_id || $elem.attr('data-report-default-chart') || '';
+        function displayChart(data, $elem, chartOptions) {
             if ($elem.find("div[data-inner-chart-container]").length === 0) {
                 $elem.append('<div data-inner-chart-container style="width:100%; height:400px;"></div>')
             }
 
-            let chart = $elem.find("div[data-inner-chart-container]")
-            // chart.append("<canvas width=\"400\" height=\"100\"></canvas>");
-            // let chartObject = getObjFromArray(data.chart_settings, 'id', chart_id, true);
-            let cache_key = data.report_slug + ':' + chart_id
+            let chartContainer = $elem.find("div[data-inner-chart-container]")[0];
+
+            let cache_key = $.slick_reporting.get_xpath($elem) + ":" + data.report_slug;
             try {
                 let existing_chart = _chart_cache[cache_key];
                 if (typeof (existing_chart) !== 'undefined') {
-                    existing_chart.highcharts().destroy()
+                    existing_chart.destroy()
                 }
             } catch (e) {
                 console.error(e)
             }
 
-            chartObject = $.slick_reporting.highcharts.createChartObject(data, chart_id);
-            _chart_cache[cache_key] = chart.highcharts(chartObject);
+            let chartObject = $.slick_reporting.highcharts.createChartObject(data, chartOptions);
+            _chart_cache[cache_key] = Highcharts.chart(chartContainer, chartObject);
 
         }
 
@@ -473,15 +423,12 @@
                     percent: 'Percent',
                 },
                 credits: {
-                    // text: 'RaSystems.io',
-                    // href: 'https://rasystems.io'
+                    // text: '',
+                    // href: ''
                 },
-                // notify_error: notify_error,
                 enable3d: false,
-
             }
         };
-
     }
 
     (jQuery)

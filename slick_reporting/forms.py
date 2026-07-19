@@ -149,15 +149,6 @@ class SlickReportForm(BaseReportForm):
     Holds basic function
     """
 
-    @property
-    def media(self):
-        from .app_settings import SLICK_REPORTING_FORM_MEDIA
-
-        return forms.Media(
-            css=SLICK_REPORTING_FORM_MEDIA.get("css", {}),
-            js=SLICK_REPORTING_FORM_MEDIA.get("js", []),
-        )
-
     def get_start_date(self):
         return self.cleaned_data.get("start_date")
 
@@ -219,6 +210,7 @@ class SlickReportForm(BaseReportForm):
             crosstab_model=getattr(self, "crosstab_model", None),
             crosstab_key_name=getattr(self, "crosstab_key_name", None),
             crosstab_display_compute_remainder=getattr(self, "crosstab_display_compute_remainder", False),
+            add_date_range=self.add_start_date or self.add_end_date,
             **kwargs,
         )
 
@@ -244,6 +236,8 @@ def report_form_factory(
     time_series_selector_default="",
     time_series_selector_label=None,
     time_series_selector_allow_empty=False,
+    add_start_date=True,
+    add_end_date=True,
 ):
     """
     Create a Report Form based on the report_model passed by
@@ -280,20 +274,20 @@ def report_form_factory(
 
     fkeys_list = []
     fields = OrderedDict()
-
-    fields["start_date"] = forms.DateTimeField(
-        required=False,
-        label=_("From date"),
-        initial=initial.get("start_date", app_settings.SLICK_REPORTING_DEFAULT_START_DATE),
-        widget=forms.DateTimeInput(attrs={"autocomplete": "off"}),
-    )
-
-    fields["end_date"] = forms.DateTimeField(
-        required=False,
-        label=_("To  date"),
-        initial=initial.get("end_date", app_settings.SLICK_REPORTING_DEFAULT_END_DATE),
-        widget=forms.DateTimeInput(attrs={"autocomplete": "off"}),
-    )
+    if add_start_date:
+        fields["start_date"] = forms.DateTimeField(
+            required=False,
+            label=_("From date"),
+            initial=initial.get("start_date", "") or app_settings.SLICK_REPORTING_SETTINGS["DEFAULT_START_DATE_TIME"],
+            widget=forms.DateTimeInput(attrs={"autocomplete": "off"}),
+        )
+    if add_end_date:
+        fields["end_date"] = forms.DateTimeField(
+            required=False,
+            label=_("To  date"),
+            initial=initial.get("end_date", "") or app_settings.SLICK_REPORTING_SETTINGS["DEFAULT_END_DATE_TIME"],
+            widget=forms.DateTimeInput(attrs={"autocomplete": "off"}),
+        )
 
     if show_time_series_selector:
         time_series_choices = list(TIME_SERIES_CHOICES)
@@ -312,6 +306,7 @@ def report_form_factory(
         field_attrs = foreign_key_widget_func(f_field)
         if name in required:
             field_attrs["required"] = True
+        field_attrs["initial"] = initial.get(name, "")
         fields[name] = f_field.formfield(**field_attrs)
 
     if crosstab_model:
@@ -363,6 +358,8 @@ def report_form_factory(
             "crosstab_display_compute_remainder": display_compute_remainder,
             "crosstab_field_related_name": crosstab_field_related_name,
             "crosstab_field_klass": crosstab_field_klass,
+            "add_start_date": add_start_date,
+            "add_end_date": add_end_date,
         },
     )
     return new_form

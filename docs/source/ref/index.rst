@@ -9,8 +9,11 @@ Below are links to the reference documentation for the various components of the
    :maxdepth: 2
    :caption: Components:
 
+   settings
+   view_options
    computation_field
    report_generator
-   view_options
+   dynamic_model
+
 
 

@@ -5,6 +5,7 @@
  */
 
 (function ($) {
+    let settings = {};
 
     function failFunction(data, $elem) {
         if (data.status === 403) {
@@ -18,7 +19,6 @@
         let chartElem = $elem.find('[data-report-chart]');
         let chart_id = $elem.attr('data-chart-id');
         let display_chart_selector = $elem.attr('data-display-chart-selector');
-        // chartElem.append("<canvas width=\"400\" height=\"100\"></canvas>");
         if (chartElem.length !== 0 && data.chart_settings.length !== 0) {
 
             $.slick_reporting.report_loader.displayChart(data, chartElem, chart_id);
@@ -37,20 +37,17 @@
 
     function displayChart(data, $elem, chart_id) {
         let engine = "highcharts";
-        // if ( typeof (chart_id) !== "undefined"){
-        //     engine = "chartsjs"
-        // }
+        let chartOptions = $.slick_reporting.getObjFromArray(data.chart_settings, 'id', chart_id, true);
+        let entryPoint = chartOptions.entryPoint || $.slick_reporting.report_loader.chart_engines[engine];
         try {
-            if (chart_id === '' || typeof (chart_id) === "undefined") {
-                engine = data.chart_settings[0]['engine_name'];
-            } else {
-                engine = data.chart_settings.find(x => x.id === chart_id).engine_name;
-            }
-        }
-        catch (e){
+            $.slick_reporting.executeFunctionByName(entryPoint, window, data, $elem, chartOptions);
+        } catch (e) {
+            // Chart engine is not found or some error in the chart rendering,
+            // we catch it and display an error message instead of breaking the entire report
+            $("<p class='text-error'>Chart could not be loaded:  <code>" + e + "</code></p> ").insertAfter($elem);
+            $elem.remove();
             console.error(e);
         }
-        $.slick_reporting.executeFunctionByName($.slick_reporting.report_loader.chart_engines[engine], window, data, $elem, chart_id);
     }
 
 
@@ -89,9 +86,26 @@
 
 
     function initialize() {
+        settings = JSON.parse(document.getElementById('slick_reporting_settings').textContent);
+        let chartSettings = {};
         $('[data-report-widget]').not('[data-no-auto-load]').each(function (i, elem) {
             refreshReportWidget($(elem));
         });
+
+        Object.keys(settings["CHARTS"]).forEach(function (key) {
+            chartSettings[key] = settings.CHARTS[key].entryPoint;
+        })
+        $.slick_reporting.report_loader.chart_engines = chartSettings;
+        $.slick_reporting.defaults.total_label = settings["MESSAGES"]["TOTAL_LABEL"];
+    }
+
+    function _get_chart_icon(chart_type) {
+        try {
+            return "<i class='" + settings.FONT_AWESOME.ICONS[chart_type] + "'></i>";
+        } catch (e) {
+            console.error(e);
+        }
+        return '';
     }
 
     function createChartsUIfromResponse(data, $elem, a_class) {
@@ -112,10 +126,7 @@
             if (chart.disabled) continue;
 
             let chart_type = chart.type;
-            if (chart_type === 'pie') icon = '<i class="fas fa-chart-pie"></i>';
-            else if (chart_type === 'line') icon = '<i class="fas fa-chart-line"></i>';
-            else if (chart_type === 'area') icon = '<i class="fas fa-chart-area"></i>';
-            else icon = '<i class="fas fa-chart-bar"></i>';
+            icon = _get_chart_icon(chart_type);
 
             ul.append('<li class="nav-link"><a href class="' + a_class + '" data-chart-id="' + chart.id + '" ' +
                 'data-report-slug="' + report_slug + '">' + icon + ' ' + chart.title + '</a></li>')
@@ -124,26 +135,47 @@
         return $container
     }
 
-    $('body').on('click', 'a[data-chart-id]', function (e) {
-        e.preventDefault();
-        let $this = $(this);
-        let data = $.slick_reporting.cache[$this.attr('data-report-slug')]
-        let chart_id = $this.attr('data-chart-id')
-        $.slick_reporting.report_loader.displayChart(data, $this.parents('[data-report-widget]').find('[data-report-chart]'), chart_id)
+
+    jQuery(document).ready(function () {
+        $.slick_reporting.report_loader.initialize();
+        $('body').on('click', 'a[data-chart-id]', function (e) {
+            e.preventDefault();
+            let $this = $(this);
+            let data = $.slick_reporting.cache[$this.attr('data-report-slug')]
+            let chart_id = $this.attr('data-chart-id')
+            $.slick_reporting.report_loader.displayChart(data, $this.parents('[data-report-widget]').find('[data-report-chart]'), chart_id)
+
+        });
+
+        $('[data-export-btn]').on('click', function (e) {
+            let $elem = $(this);
+            e.preventDefault();
+            let form = $($elem.attr('data-form-selector'));
+            let url = '?' + form.serialize() + '&_export=' + $elem.attr('data-export-parameter');
+            if ($elem.attr('data-export-new-window')) {
+                window.open(url, '_blank');
+            } else {
+                window.location = url;
+            }
+        });
+        $('[data-get-results-button]').not(".vanilla-btn-flag").on('click', function (event) {
+            event.preventDefault();
+            let $elem = $('[data-report-widget]')
+            $.slick_reporting.report_loader.refreshReportWidget($elem)
+        });
 
     });
 
+
     $.slick_reporting.report_loader = {
         cache: $.slick_reporting.cache,
+        // "extractDataFromResponse": extractDataFromResponse,
         initialize: initialize,
         refreshReportWidget: refreshReportWidget,
         failFunction: failFunction,
         displayChart: displayChart,
         createChartsUIfromResponse: createChartsUIfromResponse,
         successCallback: loadComponents,
-        "chart_engines": {
-            'highcharts': '$.slick_reporting.highcharts.displayChart',
-            "chartsjs": '$.slick_reporting.chartsjs.displayChart',
-        }
+
     }
 })(jQuery);

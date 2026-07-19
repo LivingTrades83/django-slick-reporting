@@ -3,29 +3,21 @@
 {% block page_title %} Dashboard {% endblock %}
 {% block meta_page_title %} Dashboard {% endblock %}
 
-{% block extrajs %}
-    {% include "slick_reporting/js_resources.html" %}
-    {#  make sure to have the js_resources added to the dashboard page  #}
 
-    <script>
-        function custom_js_callback(data, $elem) {
-            // data is the json response from the server
-            // $elem is the jquery object of the element `[data-report-widget]` that the report is attached to.
-
-            console.info(data);
-            console.info($elem);
-            $('#responsePre').text(JSON.stringify(data, null, 4));
-        }
-
-    </script>
-{% endblock %}
 {% block content %}
-    <div class="row row-deck row-cards">
+    <div class="mb-3 ">
+        <label class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="masonry-toggle">
+            <span class="form-check-label">Compact layout</span>
+        </label>
+    </div>
+
+    <div id="dashboard-container" class="row row-cards">
         <div class="col-lg-6">
             {% get_widget_from_url url_name="product-sales" %}
         </div>
-                <div class="col-lg-6">
-            {% get_widget_from_url url_name="total-product-sales" title="Widget custom title" %}
+        <div class="col-lg-6">
+            {% get_widget_from_url url_name="total-product-sales-by-country" title="Widget custom title" %}
         </div>
 
         <div class="col-lg-6">
@@ -33,7 +25,7 @@
         </div>
 
         <div class="col-lg-6">
-            {% get_widget_from_url url_name="total-product-sales" display_table=False title="No table, Chart Only" %}
+            {% get_widget_from_url url_name="monthly-product-sales" chart_id=1 display_table=False title="No table, Chart Only" %}
         </div>
 
         <div class="col-lg-6">
@@ -48,7 +40,60 @@
             {% get_widget_from_url url_name="total-product-sales" success_callback="custom_js_callback" title="Custom Js Handler and template" template_name="widget_template_with_pre.html" %}
         </div>
 
-
     </div>
 
+    <style>
+        .dashboard-masonry {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+        .dashboard-masonry > * {
+            flex: 0 0 calc(50% - 0.5rem);
+            min-width: 0;
+        }
+        .dashboard-masonry canvas {
+            max-width: 100%;
+        }
+        @media (max-width: 991px) {
+            .dashboard-masonry > * {
+                flex: 0 0 100%;
+            }
+        }
+    </style>
+
+{% endblock %}
+
+{% block extrajs %}
+    {% include "slick_reporting/js_resources.html" %}
+    {#  make sure to have the js_resources added to the dashboard page  #}
+
+    {% get_charts_media "all" %}
+    {# make sure to add all charts needed media to the dashboard page.  #}
+    {# "all" loads all registered chart engines. If a CDN is blocked, it may break the page. #}
+    {# You can also pass the specific chart_settings from a report view to load only what's needed. #}
+
+
+    <script>
+        function custom_js_callback(data, $elem) {
+            // data is the json response from the server
+            // $elem is the jquery object of the element `[data-report-widget]` that the report is attached to.
+
+            console.info(data);
+            console.info($elem);
+            $('#responsePre').text(JSON.stringify(data, null, 4));
+        }
+
+        $('#masonry-toggle').on('change', function () {
+            let $container = $('#dashboard-container');
+            if (this.checked) {
+                $container.removeClass('row row-cards').addClass('dashboard-masonry');
+                $container.children().removeClass('col-lg-6');
+            } else {
+                $container.removeClass('dashboard-masonry').addClass('row row-cards');
+                $container.children().addClass('col-lg-6');
+            }
+        });
+    </script>
 {% endblock %}

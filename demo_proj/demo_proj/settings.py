@@ -23,9 +23,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = "django-insecure-kb+5wbkzz-dxvmzs%49y07g7zkk9@30w%+u@2@d5x!)daivk&7"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
 
-ALLOWED_HOSTS = []
+_allowed_hosts = os.getenv("ALLOWED_HOSTS", "")
+ALLOWED_HOSTS = _allowed_hosts.split(",") if _allowed_hosts else ["*"]
+
 
 
 # Application definition
@@ -37,7 +39,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-
     "demo_app",
     "crispy_forms",
     "crispy_bootstrap5",
@@ -130,3 +131,17 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CRISPY_TEMPLATE_PACK = "bootstrap5"
 CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
+
+SLICK_REPORTING_DEFAULT_CHARTS_ENGINE = "highcharts"
+SLICK_REPORTING_SETTINGS = {
+    "CHARTS": {
+        "apexcharts": {
+            "entryPoint": "DisplayApexPieChart",
+            "js": ("https://cdn.jsdelivr.net/npm/apexcharts", "slick_reporting/slick_reporting.chartsjs.js"),
+            "css": {"all": ("https://cdn.jsdelivr.net/npm/apexcharts/dist/apexcharts.min.css",)},
+        },
+    },
+}
+
+STATIC_ROOT = os.getenv("STATIC_ROOT", BASE_DIR / "collected_static")
+MEDIA_ROOT = os.getenv("MEDIA_ROOT", str(BASE_DIR / "media"))

@@ -1,3 +1,5 @@
+import inspect
+
 from django import template
 from django.urls import reverse
 from django.utils.html import format_html
@@ -7,7 +9,7 @@ register = template.Library()
 
 
 def get_section(section):
-    from ..helpers import TUTORIAL, GROUP_BY, TIME_SERIES, CROSSTAB
+    from ..helpers import TUTORIAL, GROUP_BY, TIME_SERIES, CROSSTAB, PIVOT
     to_use = []
 
     if section == "tutorial":
@@ -18,6 +20,8 @@ def get_section(section):
         to_use = TIME_SERIES
     elif section == "crosstab":
         to_use = CROSSTAB
+    elif section == "pivot":
+        to_use = PIVOT
     return to_use
 
 
@@ -35,6 +39,20 @@ def get_menu(context, section):
         )
 
     return mark_safe("".join(menu))
+
+
+@register.simple_tag
+def get_report_source(report):
+    try:
+        return inspect.getsource(report.__class__)
+    except (OSError, TypeError):
+        return "# Source code not available"
+
+
+@register.simple_tag
+def get_report_class_label(report):
+    cls = report.__class__
+    return f"{cls.__module__}.{cls.__name__}"
 
 
 @register.simple_tag(takes_context=True)
